@@ -1,111 +1,119 @@
 import numpy as np
 import pandas as pd
-from sklearn.metrics import confusion_matrix
+from utils import import_data
+from utils import split_dataset
+from utils import seed
+from utils import print_scores
+
+from sklearn.metrics import make_scorer
+from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import GridSearchCV
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import classification_report
 
 
-def import_data(url):
+def decision_tree_clf():
 	"""
-	args
-		url: url string of CLEANED csv data
-	returns
-		credit_data: Dataframe
+	Initialise and return DecisionTreeClassifier
 	"""
-
-	credit_data = pd.read_csv(url, sep=',', header=None)
-
-	print("Dataset length: ", len(credit_data))
-	print("Dataset shape: ", credit_data.shape)
-	print("Dataset: \n", credit_data.head())
-
-	credit_data = one_hot_encode_category(credit_data)
-	print("One-hot Dataset: \n", credit_data.head())
-	print(credit_data.info())
-	return credit_data
-
-
-# Note: For category features, 
-# use one-hot encoding instead of dictionary encoding
-# to convert to numerical values
-# see:
-# https://datascience.stackexchange.com/questions/5226/strings-as-features-in-decision-tree-random-forest
-# https://www.datacamp.com/community/tutorials/categorical-data
-def one_hot_encode_category(credit_data):
-	"""
-	Splits 'category' columns into one-hot columns
-	arg, return
-		credit_data: Dataframe
-	"""
-	cat_columns = []
-	for i, _ in enumerate(credit_data):
-		# dtype == 'object' after ensuring data has been cleaned
-		# i.e no 'float' dtypes as 'object' because of '?' values
-		if credit_data[i].dtype == 'object':
-			cat_columns.append(i)
-
-	# get_dummies() one-hot encodes data
-	credit_data = pd.get_dummies(credit_data, columns=cat_columns)
-	return credit_data
-
-
-def split_dataset(data, class_index, seed):
-	"""
-	Splits dataset into train and test
-	args
-		data: Dataframe containing all data
-		class_index: int index pointing to class attribute
-		seed: int for random state
-	"""
-
-	# Separate target class from other attributes
-	X = data.values[:, 0:class_index-1]
-	Y = data.values[:, class_index]
-
-	# Train-test split
-	X_train, X_test, Y_train, Y_test = train_test_split(
-		X, Y, test_size = 0.2, random_state = seed)
-
-	return X, Y, X_train, X_test, Y_train, Y_test
-
-
-def train_using_gini(X_train, Y_train):
-	# Decision tree with gini
-	clf_gini = DecisionTreeClassifier(
-		criterion = "gini", random_state = 100,
+	clf_entropy = DecisionTreeClassifier(
+		criterion = "entropy", random_state = seed,
 		max_depth = 3, min_samples_leaf = 5
 		)
-
-	# Perform training
-	clf_gini.fit(X_train, Y_train)
-	return clf_gini
-
+	return clf_entropy
 
 def train_using_entropy(X_train, Y_train):
 	# Decision tree with entropy
-	clf_entropy = DecisionTreeClassifier(
-		criterion = "entropy", random_state = 100,
-		max_depth = 3, min_samples_leaf = 5
-		)
+	clf_entropy = decision_tree_clf()
 
 	# Perform training
 	clf_entropy.fit(X_train, Y_train)
 	return clf_entropy
 
-
 def prediction(X_test, clf_object):
-	# Prediction on test with Gini index
+	"""
+	Prediction on test
+	args
+		X_test: list of test features
+		clf_object: Classifier object
+	returns
+		Y_pred: list of test predictions
+	"""
 	Y_prediction = clf_object.predict(X_test)
-	print("Predicted values: \n", Y_prediction)
+	print("Total Predicted Values: ", len(Y_prediction))
 	return Y_prediction
 
 
-def calculate_accuracy(Y_test, Y_prediction):
-	print("Confusion Matrix: \n", confusion_matrix(Y_test, Y_prediction))
-	print("Accuracy: ", accuracy_score(Y_test, Y_prediction)*100)
-	print("Report: \n", classification_report(Y_test, Y_prediction))
+
+
+
+def cv_with_entropy(X, Y):
+	"""
+	Cross validate using 5-fold StratifiedKFold split
+	Auto fit() and predict()
+
+	args
+		X: 2d array of all feature attributes
+		Y: 2d array of all class attributes
+	returns
+		result: list of f1_macro score of each fold
+	"""
+	# Decision tree with entropy
+	clf_entropy = decision_tree_clf()
+
+	# Returns score
+	result = cross_val_score(
+		clf_entropy, X, Y, 
+		scoring='f1_macro', 
+		cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+		)
+	return result
+
+
+
+def grid_search_cv_DT(X_train, Y_train, X_test, Y_test, scorer):
+	"""
+	Grid search cross validation for obtaining best hyperparams
+	Uses 5-fold StratifiedKFold split
+	
+	args
+		X_train, Y_train, X_test, Y_test: 2d arrays of train/test data
+	returns
+		Y_pred: list of test predictions
+	"""
+	# print(DecisionTreeClassifier().get_params())
+	params = [
+		{
+		'criterion': ['gini', 'entropy'], 
+		'max_depth': [3, 5, 7],
+		'min_samples_leaf': [1, 3, 5, 7]
+		}
+	]
+	# 33% test for each of 3 folds, suitable for 653 rows
+	clf = GridSearchCV(
+		DecisionTreeClassifier(),
+		params,
+		cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=seed),
+		scoring=scorer
+		)
+	clf.fit(X_train, Y_train)
+
+	print("Best parameters set found on dev set: ", clf.best_params_)
+	print()
+	print("Grid scores on development set: ")
+	means = clf.cv_results_['mean_test_score']
+	stds = clf.cv_results_['std_test_score']
+	for mean, std, params in zip(means, stds, clf.cv_results_['params']):
+	    print("%0.3f (+/-%0.03f) for %r"
+	          % (mean, std * 2, params))
+	print()
+
+	Y_pred = clf.predict(X_test)
+	return Y_pred
+	
+
 
 
 def main():
@@ -113,18 +121,24 @@ def main():
 	data = import_data(
 		"./dataset/crx_clean.data.txt"
 		)
-	X, Y, X_train, X_test, Y_train, Y_test = split_dataset(data, 15, 100)	
-	clf_gini = train_using_gini(X_train, Y_train)
+	X, Y, X_train, X_test, Y_train, Y_test = split_dataset(data)
 	clf_entropy = train_using_entropy(X_train, Y_train)
 
 	# Operational Phase
-	print("Results using Gini Index: ")
-	Y_pred_gini = prediction(X_test, clf_gini)
-	calculate_accuracy(Y_test, Y_pred_gini)
-
-	print("Results using Entropy: ")
+	print("\n### SINGLE TRAIN-TEST SPLIT ###\n")
 	Y_pred_entropy = prediction(X_test, clf_entropy)
-	calculate_accuracy(Y_test, Y_pred_entropy)
+	print_scores(Y_test, Y_pred_entropy)
+
+	print("\n### CROSS VAL USING STRATIFIED K FOLD ###\n")
+	fold_scores = cv_with_entropy(X, Y)
+	print("Cross Validate: ", fold_scores)
+	print("Best F1_score: ", max(fold_scores)*100)
+
+	scorer = make_scorer(f1_score, pos_label='+')
+	print("\n### GRID SEARCH CROSS VAL USING STRATIFIED K FOLD###\n")
+	Y_pred_grid_search = grid_search_cv_DT(X_train, Y_train, X_test, Y_test, scorer)
+	print_scores(Y_test, Y_pred_grid_search)
+
 
 
 if __name__=="__main__":
