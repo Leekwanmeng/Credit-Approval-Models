@@ -18,10 +18,6 @@ def import_data(url):
 
 	credit_data = pd.read_csv(url, sep=',', header=None)
 
-	print("Dataset length: ", len(credit_data))
-	print("Dataset shape: ", credit_data.shape)
-	# print("Dataset: \n", credit_data.head())
-	
 	# Bring class attribute to first column
 	cols = credit_data.columns.tolist()
 	cols = cols[-1:] + cols[:-1]
@@ -29,6 +25,8 @@ def import_data(url):
 	print("Reordered Dataset: \n", credit_data.head())
 
 	credit_data = one_hot_encode_category(credit_data)
+	print("Dataset length: ", len(credit_data))
+	print("Dataset shape: ", credit_data.shape)
 	print("One-hot Dataset: \n", credit_data.head())
 	# print(credit_data.info())
 	return credit_data
